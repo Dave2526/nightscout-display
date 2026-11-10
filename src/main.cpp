@@ -1,7 +1,10 @@
 // Nightscout-Anzeige für LilyGO T-Display-S3
 // Werte per HTTPS aus Nightscout (Token mit Rolle "readable"), damit es in jedem WLAN geht.
-// MQTT nur zur Steuerung/Status: <präfix>/status (LWT online/offline), <präfix>/state (JSON),
-//   <präfix>/set/brightness 0-255|default, /set/power ON|OFF, /set/night ON|OFF|AUTO,
+// Bis zu 3 WLANs; findet es keins, öffnet sich der AP "NS-Display" und das neue WLAN kommt dazu.
+// MQTT nur zur Steuerung/Status: <präfix>/status (LWT online/offline), Einzelwerte unter
+//   <präfix>/sgv, /delta, /direction, /age_min, /iob, /cob, /error, /power, /brightness, /night,
+//   /night_active, /ip, /ssid, /rssi, /version (retained)
+//   Befehle: <präfix>/set/brightness 0-255|default, /set/power ON|OFF, /set/night ON|OFF|AUTO,
 //   /set/refresh, /set/reset (alles zurück auf Standardwerte).
 // Gespeicherte Standardwerte kommen aus der Weboberfläche (http://<hostname>/); MQTT-Befehle und
 // Tasten gelten nur bis zum nächsten Einstecken. Retained-Befehle werden ignoriert.
@@ -9,6 +12,7 @@
 //         rechts kurz = sofort abrufen, 5 s halten = WLAN/Token neu einrichten
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiMulti.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <WebServer.h>
@@ -27,7 +31,7 @@
 #define OTA_PASS ""
 #endif
 
-static const char *VERSION = "2.0";
+static const char *VERSION = "2.1";
 static const int PIN_POWER = 15;  // schaltet Display (und Akku-Betrieb) ein
 static const int PIN_BTN_L = 0;
 static const int PIN_BTN_R = 14;
@@ -36,11 +40,13 @@ static const uint32_t FETCH_MS = 60 * 1000;
 static const uint32_t STATUS_MS = 60 * 60 * 1000;
 static const uint8_t BTN_LEVELS[] = {255, 120, 40, 8};
 static const int HIST_MAX = 150;  // reicht für 12 h
+static const int WIFI_N = 3;
 
 LGFX lcd;
 LGFX_Sprite spr(&lcd);
 Preferences prefs;
 WebServer web(80);
+WiFiMulti wifiMulti;
 espMqttClient mqtt(espMqttClientTypes::UseInternalTask::NO);
 
 // ---------- Einstellungen (gespeichert = Standardwerte nach dem Einstecken) ----------
@@ -53,6 +59,7 @@ struct Settings {
   uint8_t bright, nightBright, nightFrom, nightTo, rot;
   bool nightOn;
   uint16_t graphMin;
+  String ssid[WIFI_N], pass[WIFI_N];
 } cfg;
 
 void loadPrefs() {
@@ -74,6 +81,10 @@ void loadPrefs() {
   cfg.nightTo = prefs.getUChar("nto", 7);
   cfg.rot = prefs.getUChar("rot", 1);
   cfg.graphMin = prefs.getUShort("graph", 180);
+  for (int i = 0; i < WIFI_N; i++) {
+    cfg.ssid[i] = prefs.getString(("ssid" + String(i)).c_str(), "");
+    cfg.pass[i] = prefs.getString(("wpass" + String(i)).c_str(), "");
+  }
   prefs.end();
 }
 
@@ -96,6 +107,10 @@ void savePrefs() {
   prefs.putUChar("nto", cfg.nightTo);
   prefs.putUChar("rot", cfg.rot);
   prefs.putUShort("graph", cfg.graphMin);
+  for (int i = 0; i < WIFI_N; i++) {
+    prefs.putString(("ssid" + String(i)).c_str(), cfg.ssid[i]);
+    prefs.putString(("wpass" + String(i)).c_str(), cfg.pass[i]);
+  }
   prefs.end();
 }
 
@@ -388,33 +403,34 @@ void fetchData() {
 
 // ---------- MQTT (nur Steuerung/Status) ----------
 
-String topicStatus, topicState, topicSet;
+String topicStatus, topicSet;
 uint32_t mqttRetryAt = 0, mqttBackoff = 5000;
 bool fetchNow = false;
 
+void pub(const char *name, const String &val) {
+  mqtt.publish((cfg.prefix + "/" + name).c_str(), 0, true, val.c_str());
+}
+
+String fmt1(float v) { return isnan(v) ? "" : String(v, 2); }
+
 void publishState() {
   if (!mqtt.connected()) return;
-  JsonDocument d;
-  if (histN) {
-    d["sgv"] = hist[0].sgv;
-    d["direction"] = direction;
-    if (haveDelta) d["delta"] = delta;
-    if (timeValid()) d["age_min"] = (time(nullptr) - hist[0].t) / 60;
-  }
-  if (!isnan(iob)) d["iob"] = iob;
-  if (!isnan(cob)) d["cob"] = cob;
-  d["error"] = lastError;
-  d["power"] = powerOn ? "ON" : "OFF";
-  d["brightness"] = appliedBright;
-  d["night"] = nightOverride < 0 ? "AUTO" : nightOverride ? "ON" : "OFF";
-  d["night_active"] = nightActive();
-  d["ip"] = WiFi.localIP().toString();
-  d["ssid"] = WiFi.SSID();
-  d["rssi"] = WiFi.RSSI();
-  d["version"] = VERSION;
-  String s;
-  serializeJson(d, s);
-  mqtt.publish(topicState.c_str(), 0, true, s.c_str());
+  bool fresh = histN && timeValid();
+  pub("sgv", histN ? String(hist[0].sgv) : "");
+  pub("delta", histN && haveDelta ? String(delta) : "");
+  pub("direction", histN ? direction : "");
+  pub("age_min", fresh ? String((long)((time(nullptr) - hist[0].t) / 60)) : "");
+  pub("iob", fmt1(iob));
+  pub("cob", fmt1(cob));
+  pub("error", lastError);
+  pub("power", powerOn ? "ON" : "OFF");
+  pub("brightness", String(appliedBright));
+  pub("night", nightOverride < 0 ? "AUTO" : nightOverride ? "ON" : "OFF");
+  pub("night_active", nightActive() ? "ON" : "OFF");
+  pub("ip", WiFi.localIP().toString());
+  pub("ssid", WiFi.SSID());
+  pub("rssi", String(WiFi.RSSI()));
+  pub("version", VERSION);
 }
 
 void onMqttMessage(const espMqttClientTypes::MessageProperties &props, const char *topic,
@@ -448,7 +464,6 @@ void onMqttMessage(const espMqttClientTypes::MessageProperties &props, const cha
 void mqttSetup() {
   if (cfg.mqttHost.isEmpty()) return;
   topicStatus = cfg.prefix + "/status";
-  topicState = cfg.prefix + "/state";
   topicSet = cfg.prefix + "/set/";
   mqtt.setServer(cfg.mqttHost.c_str(), cfg.mqttPort);
   if (cfg.mqttUser.length()) mqtt.setCredentials(cfg.mqttUser.c_str(), cfg.mqttPass.c_str());
@@ -519,7 +534,15 @@ void handleRoot() {
   if (lastError.length()) h += "<tr><td>Fehler</td><td>" + esc(lastError) + "</td></tr>";
   h += F("</table><form method=post action=/save>");
 
-  h += F("<fieldset><legend>Nightscout</legend>");
+  h += F("<fieldset><legend>WLANs (der Reihe nach probiert)</legend>");
+  for (int i = 0; i < WIFI_N; i++) {
+    String n = String(i + 1);
+    h += field(("WLAN " + n).c_str(), ("ssid" + n).c_str(), cfg.ssid[i], "text",
+               cfg.ssid[i].length() && cfg.ssid[i] == WiFi.SSID() ? "verbunden" : "leer = nicht benutzt");
+    h += field(("Passwort " + n).c_str(), ("wpass" + n).c_str(), "", "password",
+               cfg.pass[i].length() ? "gesetzt &ndash; leer lassen = unverändert" : "");
+  }
+  h += F("</fieldset><fieldset><legend>Nightscout</legend>");
   h += field("URL", "url", cfg.url);
   h += field("Token (Rolle readable)", "token", "", "password",
              cfg.token.length() ? "gesetzt &ndash; leer lassen = unverändert" : "noch nicht gesetzt");
@@ -579,6 +602,13 @@ void handleSave() {
   if (arg("host").length()) cfg.hostname = arg("host");
   if (arg("ntp").length()) cfg.ntp = arg("ntp");
   if (arg("tz").length()) cfg.tz = arg("tz");
+  for (int i = 0; i < WIFI_N; i++) {
+    String n = String(i + 1), ss = arg(("ssid" + n).c_str()), pw = arg(("wpass" + n).c_str());
+    if (ss != cfg.ssid[i]) cfg.pass[i] = "";  // anderes Netz: altes Passwort gilt nicht
+    cfg.ssid[i] = ss;
+    if (pw.length()) cfg.pass[i] = pw;
+    if (ss.isEmpty()) cfg.pass[i] = "";
+  }
   savePrefs();
   web.send(200, "text/html; charset=utf-8",
            "<!doctype html><meta charset=utf-8><meta http-equiv=refresh content='8;url=/'>"
@@ -589,7 +619,36 @@ void handleSave() {
 
 // ---------- WLAN-Einrichtung ----------
 
-void portal(bool force) {
+// neues WLAN vorne einsortieren (ältestes fällt raus, wenn alle 3 belegt sind)
+void rememberWifi(const String &ssid, const String &pw) {
+  if (ssid.isEmpty()) return;
+  int at = WIFI_N - 1;
+  for (int i = 0; i < WIFI_N; i++)
+    if (cfg.ssid[i] == ssid) { at = i; break; }
+  if (at == 0 && cfg.pass[0] == pw) return;
+  for (int i = at; i > 0; i--) {
+    cfg.ssid[i] = cfg.ssid[i - 1];
+    cfg.pass[i] = cfg.pass[i - 1];
+  }
+  cfg.ssid[0] = ssid;
+  cfg.pass[0] = pw;
+  savePrefs();
+}
+
+bool connectKnown() {
+  bool any = false;
+  for (int i = 0; i < WIFI_N; i++)
+    if (cfg.ssid[i].length()) {
+      wifiMulti.addAP(cfg.ssid[i].c_str(), cfg.pass[i].c_str());
+      any = true;
+    }
+  if (!any) return false;
+  for (int tries = 0; tries < 3; tries++)
+    if (wifiMulti.run(10000) == WL_CONNECTED) return true;
+  return false;
+}
+
+void portal() {
   message("Einrichtung", "WLAN \"NS-Display\" verbinden,", "dann 192.168.4.1 aufrufen");
   WiFiManager wm;
   WiFiManagerParameter pUrl("nsurl", "Nightscout-URL", cfg.url.c_str(), 120);
@@ -600,7 +659,7 @@ void portal(bool force) {
   wm.setHostname(cfg.hostname.c_str());
   wm.setConfigPortalTimeout(300);
   wm.setConnectTimeout(20);
-  bool ok = force ? wm.startConfigPortal(AP_NAME) : wm.autoConnect(AP_NAME);
+  bool ok = wm.startConfigPortal(AP_NAME);
 
   String u = pUrl.getValue(), t = pTok.getValue();
   u.trim();
@@ -611,7 +670,8 @@ void portal(bool force) {
     cfg.token = t;
     savePrefs();
   }
-  if (!ok) ESP.restart();
+  if (!ok) ESP.restart();  // Zeit abgelaufen: neu versuchen (vielleicht ist ein bekanntes WLAN zurück)
+  rememberWifi(WiFi.SSID(), WiFi.psk());
 }
 
 void resetAll() {
@@ -619,6 +679,7 @@ void resetAll() {
   WiFiManager wm;
   wm.resetSettings();
   cfg.token = "";
+  for (int i = 0; i < WIFI_N; i++) cfg.ssid[i] = cfg.pass[i] = "";
   savePrefs();
   delay(1500);
   ESP.restart();
@@ -679,8 +740,8 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(cfg.hostname.c_str());
-  portal(false);
-  if (cfg.token.isEmpty()) portal(true);
+  if (!connectKnown()) portal();
+  if (cfg.token.isEmpty()) portal();
   WiFi.setAutoReconnect(true);
 
   configTzTime(cfg.tz.c_str(), cfg.ntp.c_str(), "pool.ntp.org");
@@ -704,6 +765,16 @@ void setup() {
 }
 
 void loop() {
+  static uint32_t wifiLostAt = 0;
+  if (WiFi.isConnected()) {
+    wifiLostAt = 0;
+  } else if (!wifiLostAt) {
+    wifiLostAt = millis();
+  } else if (millis() - wifiLostAt > 30000) {
+    wifiMulti.run(10000);  // bekannte WLANs durchprobieren
+    wifiLostAt = millis();
+  }
+
   ArduinoOTA.handle();
   web.handleClient();
   mqttLoop();
