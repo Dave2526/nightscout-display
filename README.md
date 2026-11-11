@@ -40,4 +40,5 @@ retained Befehle werden ignoriert.
 
 ## Tasten
 - links kurz: Helligkeit (Stufen, bzw. einschalten) · lang: Bild drehen
-- rechts kurz: sofort abrufen · 5 s: WLAN/Token zurücksetzen
+- rechts kurz: Statusseite (IP, WLAN, MQTT, Nightscout, Laufzeit; nach 30 s zurück) · 5 s: WLAN/Token zurücksetzen
+- sofort abrufen: per MQTT `<präfix>/set/refresh`

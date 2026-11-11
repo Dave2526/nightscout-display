@@ -9,7 +9,7 @@
 // Gespeicherte Standardwerte kommen aus der Weboberfläche (http://<hostname>/); MQTT-Befehle und
 // Tasten gelten nur bis zum nächsten Einstecken. Retained-Befehle werden ignoriert.
 // Tasten: links kurz = Helligkeit, lang = Bild drehen
-//         rechts kurz = sofort abrufen, 5 s halten = WLAN/Token neu einrichten
+//         rechts kurz = Statusseite an/aus (IP, WLAN, MQTT …), 5 s halten = WLAN/Token neu einrichten
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiMulti.h>
@@ -31,7 +31,7 @@
 #define OTA_PASS ""
 #endif
 
-static const char *VERSION = "2.1";
+static const char *VERSION = "2.2";
 static const int PIN_POWER = 15;  // schaltet Display (und Akku-Betrieb) ein
 static const int PIN_BTN_L = 0;
 static const int PIN_BTN_R = 14;
@@ -138,6 +138,9 @@ uint32_t lastFetch = 0, lastStatus = 0;
 time_t lastFetchOk = 0;
 bool statusOk = false;
 bool stateDirty = false;
+bool statusPage = false;
+uint32_t statusSince = 0;
+String mqttInfo = "noch nicht verbunden";
 
 bool timeValid() { return time(nullptr) > 1700000000; }
 
@@ -246,7 +249,57 @@ void drawGraph(int y0, int h, time_t now) {
   }
 }
 
+void drawStatus() {
+  char buf[64];
+  spr.fillScreen(TFT_BLACK);
+  spr.setTextDatum(top_left);
+  spr.setFont(&fonts::FreeSansBold9pt7b);
+  spr.setTextColor(TFT_WHITE);
+  spr.drawString("Status", 6, 3);
+  spr.setTextDatum(top_right);
+  spr.setTextColor(TFT_DARKGREY);
+  spr.drawString(String("v") + VERSION, 314, 3);
+
+  spr.setTextDatum(top_left);
+  spr.setFont(&fonts::FreeSansBold12pt7b);
+  spr.setTextColor(WiFi.isConnected() ? lcd.color565(40, 230, 110) : TFT_RED);
+  spr.drawString(WiFi.isConnected() ? WiFi.localIP().toString() : String("kein WLAN"), 6, 24);
+
+  int y = 54;
+  auto row = [&](const char *label, const String &val, uint16_t col) {
+    spr.setFont(&fonts::FreeSans9pt7b);
+    spr.setTextColor(TFT_DARKGREY);
+    spr.drawString(label, 6, y);
+    spr.setTextColor(col);
+    spr.drawString(val, 92, y);
+    y += 19;
+  };
+  row("Name", cfg.hostname, TFT_LIGHTGREY);
+  snprintf(buf, sizeof(buf), " (%d dBm)", WiFi.RSSI());
+  row("WLAN", WiFi.isConnected() ? WiFi.SSID() + buf : String("-"), TFT_LIGHTGREY);
+  row("MQTT", mqtt.connected() ? cfg.prefix : (cfg.mqttHost.isEmpty() ? String("aus") : mqttInfo),
+      mqtt.connected() ? TFT_LIGHTGREY : TFT_ORANGE);
+  String ns = "-";
+  if (lastFetchOk) {
+    struct tm lt;
+    localtime_r(&lastFetchOk, &lt);
+    strftime(buf, sizeof(buf), "ok %H:%M:%S", &lt);
+    ns = buf;
+  }
+  if (lastError.length()) ns = lastError;
+  row("Nightscout", ns, lastError.length() ? TFT_RED : TFT_LIGHTGREY);
+  uint32_t up = millis() / 60000;
+  snprintf(buf, sizeof(buf), "%lud %luh %lum, %u kB frei", (unsigned long)(up / 1440),
+           (unsigned long)(up / 60 % 24), (unsigned long)(up % 60), ESP.getFreeHeap() / 1024);
+  row("Laufzeit", buf, TFT_LIGHTGREY);
+  spr.pushSprite(0, 0);
+}
+
 void draw() {
+  if (statusPage) {
+    drawStatus();
+    return;
+  }
   time_t now = time(nullptr);
   bool timeOk = timeValid();
   struct tm lt;
@@ -476,6 +529,9 @@ void mqttSetup() {
     stateDirty = true;
   });
   mqtt.onMessage(onMqttMessage);
+  mqtt.onDisconnect([](espMqttClientTypes::DisconnectReason r) {
+    mqttInfo = String("Fehler ") + (int)r + " (" + cfg.mqttHost + ")";
+  });
 }
 
 void mqttLoop() {
@@ -789,7 +845,12 @@ void loop() {
 
   int r = pollButton(btnR, 5000);
   if (r == 2) resetAll();
-  if (r == 1) fetchNow = true;
+  if (r == 1) {
+    statusPage = !statusPage;
+    statusSince = millis();
+    draw();
+  }
+  if (statusPage && millis() - statusSince > 30000) statusPage = false;  // von selbst zurück
 
   if (fetchNow || millis() - lastFetch >= FETCH_MS) {
     fetchNow = false;
