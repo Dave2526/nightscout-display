@@ -31,7 +31,11 @@
 #define OTA_PASS ""
 #endif
 
-static const char *VERSION = "2.2";
+#ifndef GIT_COMMIT
+#define GIT_COMMIT "?"
+#endif
+
+static const char *VERSION = "2.3";
 static const int PIN_POWER = 15;  // schaltet Display (und Akku-Betrieb) ein
 static const int PIN_BTN_L = 0;
 static const int PIN_BTN_R = 14;
@@ -258,7 +262,7 @@ void drawStatus() {
   spr.drawString("Status", 6, 3);
   spr.setTextDatum(top_right);
   spr.setTextColor(TFT_DARKGREY);
-  spr.drawString(String("v") + VERSION, 314, 3);
+  spr.drawString(String("v") + VERSION + "  " + GIT_COMMIT, 314, 3);
 
   spr.setTextDatum(top_left);
   spr.setFont(&fonts::FreeSansBold12pt7b);
@@ -483,7 +487,7 @@ void publishState() {
   pub("ip", WiFi.localIP().toString());
   pub("ssid", WiFi.SSID());
   pub("rssi", String(WiFi.RSSI()));
-  pub("version", VERSION);
+  pub("version", String(VERSION) + " " + GIT_COMMIT);
 }
 
 void onMqttMessage(const espMqttClientTypes::MessageProperties &props, const char *topic,
@@ -577,7 +581,7 @@ void handleRoot() {
   h += esc(cfg.hostname);
   h += F("</h2><table>");
   char buf[64];
-  h += "<tr><td>Version</td><td>" + String(VERSION) + "</td></tr>";
+  h += "<tr><td>Version</td><td>" + String(VERSION) + " (" + GIT_COMMIT + ")</td></tr>";
   h += "<tr><td>WLAN</td><td>" + esc(WiFi.SSID()) + " (" + WiFi.RSSI() + " dBm), " +
        WiFi.localIP().toString() + "</td></tr>";
   h += "<tr><td>MQTT</td><td>" + String(mqtt.connected() ? "verbunden" : "nicht verbunden") + "</td></tr>";
