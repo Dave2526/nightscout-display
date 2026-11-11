@@ -35,7 +35,7 @@
 #define GIT_COMMIT "?"
 #endif
 
-static const char *VERSION = "2.3";
+static const char *VERSION = "2.4";
 static const int PIN_POWER = 15;  // schaltet Display (und Akku-Betrieb) ein
 static const int PIN_BTN_L = 0;
 static const int PIN_BTN_R = 14;
@@ -45,6 +45,9 @@ static const uint32_t STATUS_MS = 60 * 60 * 1000;
 static const uint8_t BTN_LEVELS[] = {255, 120, 40, 8};
 static const int HIST_MAX = 150;  // reicht für 12 h
 static const int WIFI_N = 3;
+// Farben je Bereich: zu niedrig, außerhalb Ziel, zu hoch, im Ziel
+static const uint32_t DEF_COL[4] = {0xFF2828, 0xFFD200, 0xFF7800, 0x28E66E};
+static const char *COL_NAME[4] = {"unter Low", "ausserhalb Zielbereich", "ueber High", "im Zielbereich"};
 
 LGFX lcd;
 LGFX_Sprite spr(&lcd);
@@ -63,6 +66,9 @@ struct Settings {
   uint8_t bright, nightBright, nightFrom, nightTo, rot;
   bool nightOn;
   uint16_t graphMin;
+  bool ownTh;      // eigene Grenzwerte statt der aus Nightscout
+  int16_t th[4];   // Low, Ziel unten, Ziel oben, High
+  uint32_t col[4];
   String ssid[WIFI_N], pass[WIFI_N];
 } cfg;
 
@@ -85,6 +91,12 @@ void loadPrefs() {
   cfg.nightTo = prefs.getUChar("nto", 7);
   cfg.rot = prefs.getUChar("rot", 1);
   cfg.graphMin = prefs.getUShort("graph", 180);
+  cfg.ownTh = prefs.getBool("ownth", false);
+  const int16_t defTh[4] = {72, 80, 180, 250};
+  for (int i = 0; i < 4; i++) {
+    cfg.th[i] = prefs.getShort(("th" + String(i)).c_str(), defTh[i]);
+    cfg.col[i] = prefs.getULong(("col" + String(i)).c_str(), DEF_COL[i]);
+  }
   for (int i = 0; i < WIFI_N; i++) {
     cfg.ssid[i] = prefs.getString(("ssid" + String(i)).c_str(), "");
     cfg.pass[i] = prefs.getString(("wpass" + String(i)).c_str(), "");
@@ -111,6 +123,11 @@ void savePrefs() {
   prefs.putUChar("nto", cfg.nightTo);
   prefs.putUChar("rot", cfg.rot);
   prefs.putUShort("graph", cfg.graphMin);
+  prefs.putBool("ownth", cfg.ownTh);
+  for (int i = 0; i < 4; i++) {
+    prefs.putShort(("th" + String(i)).c_str(), cfg.th[i]);
+    prefs.putULong(("col" + String(i)).c_str(), cfg.col[i]);
+  }
   for (int i = 0; i < WIFI_N; i++) {
     prefs.putString(("ssid" + String(i)).c_str(), cfg.ssid[i]);
     prefs.putString(("wpass" + String(i)).c_str(), cfg.pass[i]);
@@ -136,7 +153,16 @@ String direction;
 bool haveDelta = false;
 int delta = 0;
 float iob = NAN, cob = NAN;
-int thLow = 72, thBottom = 80, thTop = 180, thHigh = 250;
+int thLow = 72, thBottom = 80, thTop = 180, thHigh = 250;  // gültige Grenzwerte
+int nsTh[4] = {72, 80, 180, 250};                           // zuletzt aus Nightscout
+
+void applyThresholds() {
+  const int *t = cfg.ownTh ? nullptr : nsTh;
+  thLow = t ? t[0] : cfg.th[0];
+  thBottom = t ? t[1] : cfg.th[1];
+  thTop = t ? t[2] : cfg.th[2];
+  thHigh = t ? t[3] : cfg.th[3];
+}
 String lastError;
 uint32_t lastFetch = 0, lastStatus = 0;
 time_t lastFetchOk = 0;
@@ -176,11 +202,14 @@ void applyBright() {
 
 // ---------- Anzeige ----------
 
+// RGB 0xRRGGBB -> Display-Farbe, f = Helligkeitsanteil in Prozent
+uint16_t rgb(uint32_t c, int f = 100) {
+  return lcd.color565(((c >> 16) & 0xFF) * f / 100, ((c >> 8) & 0xFF) * f / 100, (c & 0xFF) * f / 100);
+}
+
 uint16_t bgColor(int v) {
-  if (v < thLow) return lcd.color565(255, 40, 40);
-  if (v > thHigh) return lcd.color565(255, 120, 0);
-  if (v < thBottom || v > thTop) return lcd.color565(255, 210, 0);
-  return lcd.color565(40, 230, 110);
+  int i = v < thLow ? 0 : v > thHigh ? 2 : (v < thBottom || v > thTop) ? 1 : 3;
+  return rgb(cfg.col[i]);
 }
 
 void message(const char *l1, const char *l2 = "", const char *l3 = "") {
@@ -239,11 +268,11 @@ void drawGraph(int y0, int h, time_t now) {
     return y0 + h - 1 - (v - vmin) * (h - 1) / (vmax - vmin);
   };
   int span = cfg.graphMin;
-  spr.fillRect(0, ymap(thTop), W, ymap(thBottom) - ymap(thTop) + 1, lcd.color565(0, 45, 20));
+  spr.fillRect(0, ymap(thTop), W, ymap(thBottom) - ymap(thTop) + 1, rgb(cfg.col[3], 18));
   for (int m = 60; m < span; m += 60)  // Stundenstriche
     spr.drawFastVLine(W - 4 - m * (W - 8) / span, y0, h, lcd.color565(35, 35, 35));
-  spr.drawFastHLine(0, ymap(thLow), W, lcd.color565(120, 20, 20));
-  spr.drawFastHLine(0, ymap(thHigh), W, lcd.color565(120, 70, 0));
+  spr.drawFastHLine(0, ymap(thLow), W, rgb(cfg.col[0], 50));
+  spr.drawFastHLine(0, ymap(thHigh), W, rgb(cfg.col[2], 50));
   int r = span <= 240 ? 2 : 1;
   for (int i = 0; i < histN; i++) {
     long ageMin = (now - hist[i].t) / 60;
@@ -413,10 +442,11 @@ void fetchStatus() {
   filter["settings"]["thresholds"] = true;
   if (!getJson("/api/v1/status.json", doc, &filter)) return;
   JsonObject th = doc["settings"]["thresholds"];
-  thLow = th["bgLow"] | thLow;
-  thBottom = th["bgTargetBottom"] | thBottom;
-  thTop = th["bgTargetTop"] | thTop;
-  thHigh = th["bgHigh"] | thHigh;
+  nsTh[0] = th["bgLow"] | nsTh[0];
+  nsTh[1] = th["bgTargetBottom"] | nsTh[1];
+  nsTh[2] = th["bgTargetTop"] | nsTh[2];
+  nsTh[3] = th["bgHigh"] | nsTh[3];
+  applyThresholds();
   statusOk = true;
 }
 
@@ -607,6 +637,19 @@ void handleRoot() {
   h += field("Token (Rolle readable)", "token", "", "password",
              cfg.token.length() ? "gesetzt &ndash; leer lassen = unverändert" : "noch nicht gesetzt");
   h += field("Verlauf (Minuten)", "graph", String(cfg.graphMin), "number", "60 bis 720");
+  h += F("</fieldset><fieldset><legend>Grenzwerte (mg/dl)</legend>");
+  h += cfg.ownTh ? F("<small>eigene Werte</small>") : F("<small>aus Nightscout</small>");
+  const char *thName[4] = {"Low", "Ziel unten", "Ziel oben", "High"};
+  const int cur[4] = {thLow, thBottom, thTop, thHigh};
+  for (int i = 0; i < 4; i++)
+    h += field(thName[i], ("th" + String(i)).c_str(), String(cur[i]), "number");
+  h += F("<button formaction=/nsth>Aus Nightscout laden</button>");
+  h += F("</fieldset><fieldset><legend>Farben</legend>");
+  for (int i = 0; i < 4; i++) {
+    snprintf(buf, sizeof(buf), "#%06lX", (unsigned long)cfg.col[i]);
+    h += field(COL_NAME[i], ("col" + String(i)).c_str(), buf, "color");
+  }
+  h += F("<button formaction=/defcol>Standardfarben</button>");
   h += F("</fieldset><fieldset><legend>Anzeige</legend>");
   h += field("Helligkeit", "bright", String(cfg.bright), "number", "0 bis 255");
   h += String("<label><input type=checkbox name=night value=1") + (cfg.nightOn ? " checked" : "") +
@@ -668,6 +711,20 @@ void handleSave() {
     cfg.ssid[i] = ss;
     if (pw.length()) cfg.pass[i] = pw;
     if (ss.isEmpty()) cfg.pass[i] = "";
+  }
+  int t[4];
+  bool asc = true;
+  for (int i = 0; i < 4; i++) {
+    t[i] = num(("th" + String(i)).c_str(), 30, 400, 0);
+    if (i && t[i] < t[i - 1]) asc = false;
+  }
+  if (asc && t[0] && (t[0] != thLow || t[1] != thBottom || t[2] != thTop || t[3] != thHigh)) {
+    cfg.ownTh = true;  // nur wer etwas ändert, bekommt eigene Grenzwerte
+    for (int i = 0; i < 4; i++) cfg.th[i] = t[i];
+  }
+  for (int i = 0; i < 4; i++) {
+    String c = arg(("col" + String(i)).c_str());
+    if (c.length() == 7 && c[0] == '#') cfg.col[i] = strtoul(c.c_str() + 1, nullptr, 16);
   }
   savePrefs();
   web.send(200, "text/html; charset=utf-8",
@@ -789,6 +846,7 @@ void setup() {
   Serial.begin(115200);
 
   loadPrefs();
+  applyThresholds();
   rot = cfg.rot;
   lcd.init();
   lcd.setRotation(rot);
@@ -813,6 +871,21 @@ void setup() {
 
   web.on("/", HTTP_GET, handleRoot);
   web.on("/save", HTTP_POST, handleSave);
+  web.on("/nsth", HTTP_POST, []() {
+    cfg.ownTh = false;
+    savePrefs();
+    statusOk = false;  // beim nächsten Abruf frisch aus Nightscout
+    fetchNow = true;
+    applyThresholds();
+    web.sendHeader("Location", "/");
+    web.send(303);
+  });
+  web.on("/defcol", HTTP_POST, []() {
+    for (int i = 0; i < 4; i++) cfg.col[i] = DEF_COL[i];
+    savePrefs();
+    web.sendHeader("Location", "/");
+    web.send(303);
+  });
   web.begin();
 
   mqttSetup();

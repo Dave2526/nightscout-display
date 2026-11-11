@@ -10,7 +10,7 @@ Werte kommen per **HTTPS aus Nightscout** (Token mit Rolle `readable`), daher in
 ## Einrichtung
 - bis zu **3 WLANs**, der Reihe nach probiert; findet es keins, öffnet sich der AP `NS-Display`
   (192.168.4.1): WLAN, Nightscout-URL, Token. Das neue WLAN kommt vorne dazu, bei 3 belegten fällt das älteste raus.
-- Weboberfläche `http://<hostname>/`: WLANs und gespeicherte **Standardwerte** (Helligkeit, Nachtmodus,
+- Weboberfläche `http://<hostname>/`: WLANs, Grenzwerte (Standard aus Nightscout, Knopf „Aus Nightscout laden“), Farben je Bereich und gespeicherte **Standardwerte** (Helligkeit, Nachtmodus,
   Verlauf, MQTT, Hostname, NTP, Zeitzone). Speichern startet neu.
 
 ## MQTT (Präfix je Gerät, z.B. `/raum1/display`, `/raum2/display`)
