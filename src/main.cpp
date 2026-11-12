@@ -35,7 +35,7 @@
 #define GIT_COMMIT "?"
 #endif
 
-static const char *VERSION = "2.4";
+static const char *VERSION = "2.5";
 static const int PIN_POWER = 15;  // schaltet Display (und Akku-Betrieb) ein
 static const int PIN_BTN_L = 0;
 static const int PIN_BTN_R = 14;
@@ -163,7 +163,7 @@ void applyThresholds() {
   thTop = t ? t[2] : cfg.th[2];
   thHigh = t ? t[3] : cfg.th[3];
 }
-String lastError;
+String lastError, lastErrorDetail;  // Detail nur für MQTT/Weboberfläche
 uint32_t lastFetch = 0, lastStatus = 0;
 time_t lastFetchOk = 0;
 bool statusOk = false;
@@ -426,6 +426,11 @@ bool getJson(const String &path, JsonDocument &doc, JsonDocument *filter = nullp
   int code = http.GET();
   if (code != 200) {
     lastError = code == 401 ? "Token?" : code < 0 ? "Verbindung" : "HTTP " + String(code);
+    if (code < 0) {
+      char buf[100];
+      int e = tls.lastError(buf, sizeof(buf));
+      lastErrorDetail = String(code) + " " + http.errorToString(code) + (e ? " / TLS " + String(e) + " " + buf : "");
+    }
     http.end();
     return false;
   }
@@ -452,6 +457,7 @@ void fetchStatus() {
 
 void fetchData() {
   lastError = "";
+  lastErrorDetail = "";
   if (!statusOk || millis() - lastStatus > STATUS_MS) {
     lastStatus = millis();
     fetchStatus();
@@ -510,11 +516,17 @@ void publishState() {
   pub("iob", fmt1(iob));
   pub("cob", fmt1(cob));
   pub("error", lastError);
+  pub("error_detail", lastErrorDetail);
+  { time_t t = time(nullptr); struct tm lt; localtime_r(&t, &lt); char b[24]; strftime(b, sizeof(b), "%Y-%m-%d %H:%M:%S", &lt); pub("time", b); }
   pub("power", powerOn ? "ON" : "OFF");
   pub("brightness", String(appliedBright));
   pub("night", nightOverride < 0 ? "AUTO" : nightOverride ? "ON" : "OFF");
   pub("night_active", nightActive() ? "ON" : "OFF");
   pub("ip", WiFi.localIP().toString());
+  pub("gateway", WiFi.gatewayIP().toString());
+  pub("dns", WiFi.dnsIP().toString());
+  pub("subnet", WiFi.subnetMask().toString());
+  pub("bssid", WiFi.BSSIDstr());
   pub("ssid", WiFi.SSID());
   pub("rssi", String(WiFi.RSSI()));
   pub("version", String(VERSION) + " " + GIT_COMMIT);

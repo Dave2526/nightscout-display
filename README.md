@@ -22,8 +22,10 @@ Status, alles retained, je Wert ein Topic:
 | `<präfix>/sgv`, `/delta`, `/direction`, `/age_min` | BZ (mg/dl), Änderung, Trend, Alter in Minuten |
 | `<präfix>/iob`, `/cob` | aus Nightscout |
 | `<präfix>/error` | leer oder Fehlertext (`Token?`, `Verbindung` …) |
+| `<präfix>/error_detail` | bei `Verbindung`: HTTP-Fehlercode und TLS-Fehler |
 | `<präfix>/power`, `/brightness`, `/night`, `/night_active` | `ON`/`OFF`, 0–255, `ON`/`OFF`/`AUTO`, `ON`/`OFF` |
 | `<präfix>/ip`, `/ssid`, `/rssi`, `/version` | Gerät |
+| `<präfix>/gateway`, `/dns`, `/subnet`, `/bssid`, `/time` | Netz und Uhrzeit (zur Fehlersuche) |
 
 Befehle:
 
