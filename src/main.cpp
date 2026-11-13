@@ -35,7 +35,7 @@
 #define GIT_COMMIT "?"
 #endif
 
-static const char *VERSION = "2.5";
+static const char *VERSION = "2.6";
 static const int PIN_POWER = 15;  // schaltet Display (und Akku-Betrieb) ein
 static const int PIN_BTN_L = 0;
 static const int PIN_BTN_R = 14;
@@ -499,6 +499,29 @@ void fetchData() {
 String topicStatus, topicSet;
 uint32_t mqttRetryAt = 0, mqttBackoff = 5000;
 bool fetchNow = false;
+bool netTestNow = false;
+void pub(const char *name, const String &val);
+
+// Fehlersuche: TCP-Aufbau zu einigen Zielen, Ergebnis nach <präfix>/nettest (per <präfix>/set/nettest)
+void netTest() {
+  struct { const char *name; IPAddress ip; uint16_t port; } z[] = {
+    {"vserver:443", IPAddress(192, 0, 2, 1), 443},
+    {"vserver:80", IPAddress(192, 0, 2, 1), 80},
+    {"1.1.1.1:443", IPAddress(1, 1, 1, 1), 443},
+    {"server:1337", IPAddress(192, 168, 1, 10), 1337},
+  };
+  String r;
+  for (auto &t : z) {
+    WiFiClient c;
+    errno = 0;
+    uint32_t t0 = millis();
+    bool ok = c.connect(t.ip, t.port, 5000);
+    int e = errno;
+    c.stop();
+    r += String(t.name) + (ok ? "=ok " : "=err" + String(e) + " ") + String(millis() - t0) + "ms; ";
+  }
+  pub("nettest", r);
+}
 
 void pub(const char *name, const String &val) {
   mqtt.publish((cfg.prefix + "/" + name).c_str(), 0, true, val.c_str());
@@ -550,6 +573,8 @@ void onMqttMessage(const espMqttClientTypes::MessageProperties &props, const cha
   } else if (cmd == "night") {
     nightOverride = up == "ON" ? 1 : up == "OFF" ? 0 : -1;
     brightOverride = -1;
+  } else if (cmd == "nettest") {
+    netTestNow = true;
   } else if (cmd == "refresh") {
     fetchNow = true;
   } else if (cmd == "reset") {
@@ -941,6 +966,10 @@ void loop() {
   }
   if (statusPage && millis() - statusSince > 30000) statusPage = false;  // von selbst zurück
 
+  if (netTestNow) {
+    netTestNow = false;
+    netTest();
+  }
   if (fetchNow || millis() - lastFetch >= FETCH_MS) {
     fetchNow = false;
     lastFetch = millis();
