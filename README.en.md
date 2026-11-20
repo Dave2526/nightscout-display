@@ -12,16 +12,21 @@ current blood glucose from [Nightscout](https://nightscout.github.io/): BG in a 
   as usual.
 - Up to **3 Wi-Fi networks**, setup via its own access point, settings via a web interface.
 
-> This GitHub repository is a mirror. Development happens on a private Forgejo instance, changes
-> come from there.
+> This GitHub repository is a mirror. Development happens on a private Forgejo instance, every
+> change is pushed here from there. Issues are welcome here; pull requests I apply by hand, since
+> they would otherwise be overwritten by the next mirror push.
 
 ## Build and flash
 
-Built with [PlatformIO](https://platformio.org/) (`platformio.ini` included).
+Built with [PlatformIO](https://platformio.org/) (`platformio.ini` included, e.g. in VS Code with
+the PlatformIO extension).
 
-- Without Docker: `NS_OTA_PASS=<password> pio run -e tdisplay-s3`
-- **First time via USB**, e.g. with the [esptool-js web flasher](https://espressif.github.io/esptool-js/)
-  (`dist/ns-display.bin` at address `0x0`). If no port shows up: hold BOOT, press RST.
+- **First time via USB:** `NS_OTA_PASS=<password> pio run -e tdisplay-s3 -t upload`
+  If no port shows up: hold BOOT, press RST.
+- **Afterwards over Wi-Fi:** `NS_OTA_PASS=<password> NS_HOST=<hostname-or-ip> pio run -e ota -t upload`
+
+> ⚠️ Always set `NS_OTA_PASS` and use the same password for later updates. Without a password,
+> anyone on the same Wi-Fi can flash a different firmware.
 
 ### Your own defaults
 
@@ -31,6 +36,8 @@ All values can also be changed later in the web interface.
 
 ## Setup
 
+- Nightscout token: in Nightscout, open *Admin Tools*, create a subject with the role `readable`
+  and use its access token.
 - If the display finds none of its Wi-Fi networks, it opens the access point `NS-Display`
   (192.168.4.1). Enter Wi-Fi, Nightscout URL and token there. The new network is added at the
   top; with all 3 slots used, the oldest one is dropped.

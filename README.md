@@ -11,16 +11,21 @@ Bereich), Trendpfeil, Delta, IOB/COB und den Verlauf.
 - **MQTT** ist optional und dient nur zur Steuerung und zum Status. Ohne Broker läuft die Anzeige normal.
 - Bis zu **3 WLANs**, Einrichtung über einen eigenen Access Point, Einstellungen über eine Weboberfläche.
 
-> Dieses GitHub-Repo ist ein Spiegel. Entwickelt wird in einem privaten Forgejo, Änderungen kommen
-> von dort.
+> Dieses GitHub-Repo ist ein Spiegel. Entwickelt wird in einem privaten Forgejo, von dort wird
+> jeder Stand hierher übertragen. Issues gern hier; Pull Requests übernehme ich von Hand, weil sie
+> hier sonst beim nächsten Spiegeln überschrieben würden.
 
 ## Bauen und Aufspielen
 
-Gebaut wird mit [PlatformIO](https://platformio.org/) (`platformio.ini` liegt bei).
+Gebaut wird mit [PlatformIO](https://platformio.org/) (`platformio.ini` liegt bei, z.B. in VS Code
+mit der PlatformIO-Erweiterung).
 
-- Ohne Docker: `NS_OTA_PASS=<passwort> pio run -e tdisplay-s3`
-- **Erstes Mal per USB**, z.B. mit dem [esptool-js Web-Flasher](https://espressif.github.io/esptool-js/)
-  (`dist/ns-display.bin` an Adresse `0x0`). Wird kein Port gefunden: BOOT halten, RST drücken.
+- **Erstes Mal per USB:** `NS_OTA_PASS=<passwort> pio run -e tdisplay-s3 -t upload`
+  Wird kein Port gefunden: BOOT halten, RST drücken.
+- **Danach per WLAN:** `NS_OTA_PASS=<passwort> NS_HOST=<hostname-oder-ip> pio run -e ota -t upload`
+
+> ⚠️ `NS_OTA_PASS` immer setzen und beim späteren Aufspielen dasselbe Passwort nehmen. Ohne
+> Passwort kann jeder im selben WLAN eine andere Firmware aufspielen.
 
 ### Eigene Standardwerte
 
@@ -30,6 +35,8 @@ sich später auch in der Weboberfläche ändern.
 
 ## Einrichtung
 
+- Nightscout-Token: in Nightscout unter *Administrator-Werkzeuge* ein Subjekt mit der Rolle
+  `readable` anlegen und dessen Zugangs-Token nehmen.
 - Findet das Display keines seiner WLANs, öffnet es den Access Point `NS-Display` (192.168.4.1). Dort
   WLAN, Nightscout-URL und Token eintragen. Das neue WLAN kommt vorne dazu, sind alle 3 belegt, fällt
   das älteste raus.
