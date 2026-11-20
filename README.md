@@ -13,6 +13,8 @@ Werte kommen per **HTTPS aus Nightscout** (Token mit Rolle `readable`), daher in
 - Weboberfläche `http://<hostname>/`: WLANs, Grenzwerte (Standard aus Nightscout, Knopf „Aus Nightscout laden“), Farben je Bereich und gespeicherte **Standardwerte** (Helligkeit, Nachtmodus,
   Verlauf, MQTT, Hostname, NTP, Zeitzone). Speichern startet neu.
 
+Eigene Standardwerte (Nightscout-URL, MQTT-Server, Präfix, Ziele des Netztests): `src/config_example.h` nach `src/config_local.h` kopieren und anpassen, die Datei bleibt außerhalb des Repos.
+
 ## MQTT (Präfix je Gerät, z.B. `/raum1/display`, `/raum2/display`)
 Status, alles retained, je Wert ein Topic:
 

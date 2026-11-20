@@ -26,6 +26,12 @@
 
 #include "lgfx_tdisplay_s3.h"
 #include "certs.h"
+// Eigene Standardwerte (URL, MQTT, Netztest) in config_local.h, sonst Platzhalter
+#if __has_include("config_local.h")
+#include "config_local.h"
+#else
+#include "config_example.h"
+#endif
 
 #ifndef OTA_PASS
 #define OTA_PASS ""
@@ -74,16 +80,16 @@ struct Settings {
 
 void loadPrefs() {
   prefs.begin("nsd", true);
-  cfg.url = prefs.getString("url", "https://nightscout.example.org");
+  cfg.url = prefs.getString("url", DEFAULT_NS_URL);
   cfg.token = prefs.getString("token", "");
   cfg.hostname = prefs.getString("host", "ns-display");
   cfg.ntp = prefs.getString("ntp", "fritz.box");
   cfg.tz = prefs.getString("tz", "CET-1CEST,M3.5.0,M10.5.0/3");
-  cfg.mqttHost = prefs.getString("mhost", "192.168.1.10");
+  cfg.mqttHost = prefs.getString("mhost", DEFAULT_MQTT_HOST);
   cfg.mqttPort = prefs.getUShort("mport", 1883);
   cfg.mqttUser = prefs.getString("muser", "");
   cfg.mqttPass = prefs.getString("mpass", "");
-  cfg.prefix = prefs.getString("prefix", "/raum1/display");
+  cfg.prefix = prefs.getString("prefix", DEFAULT_PREFIX);
   cfg.bright = prefs.getUChar("bright", 255);
   cfg.nightOn = prefs.getBool("night", false);
   cfg.nightBright = prefs.getUChar("nbright", 10);
@@ -504,12 +510,7 @@ void pub(const char *name, const String &val);
 
 // Fehlersuche: TCP-Aufbau zu einigen Zielen, Ergebnis nach <präfix>/nettest (per <präfix>/set/nettest)
 void netTest() {
-  struct { const char *name; IPAddress ip; uint16_t port; } z[] = {
-    {"vserver:443", IPAddress(192, 0, 2, 1), 443},
-    {"vserver:80", IPAddress(192, 0, 2, 1), 80},
-    {"1.1.1.1:443", IPAddress(1, 1, 1, 1), 443},
-    {"server:1337", IPAddress(192, 168, 1, 10), 1337},
-  };
+  struct { const char *name; IPAddress ip; uint16_t port; } z[] = {NETTEST_TARGETS};
   String r;
   for (auto &t : z) {
     WiFiClient c;
